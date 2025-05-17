@@ -1,14 +1,31 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
+	"strings"
 	"time"
+
+	_ "github.com/mattn/go-sqlite3" // SQLite driver
 )
 
-const logFilePath = "/dados/dados_capturados.txt"
+var db *sql.DB // Global database connection variable
+
+func createTable() {
+	createTableSQL := `CREATE TABLE IF NOT EXISTS logs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp TEXT NOT NULL,
+		data TEXT NOT NULL
+	);`
+
+	_, err := db.Exec(createTableSQL)
+	if err != nil {
+		log.Fatalf("Error creating table: %v", err)
+	}
+	log.Println("Table 'logs' checked/created successfully.")
+}
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	data := r.URL.Query().Get("data")
@@ -17,22 +34,15 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		timestamp := time.Now().Format("2006-01-02 15:04:05")
 		log.Printf("[+] %s - Dado recebido: %s\n", timestamp, data)
 
-		f, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		insertSQL := `INSERT INTO logs (timestamp, data) VALUES (?, ?)`
+		_, err := db.Exec(insertSQL, timestamp, data)
 		if err != nil {
-			log.Printf("Erro ao abrir o arquivo: %v\n", err)
-			http.Error(w, "Erro interno", http.StatusInternalServerError)
-			return
-		}
-		defer f.Close()
-
-		entry := fmt.Sprintf("%s - %s\n", timestamp, data)
-		if _, err := f.WriteString(entry); err != nil {
-			log.Printf("Erro ao escrever no arquivo: %v\n", err)
+			log.Printf("Erro ao inserir no banco de dados: %v\n", err)
 			http.Error(w, "Erro interno", http.StatusInternalServerError)
 			return
 		}
 
-		fmt.Fprintln(w, "Dado capturado com sucesso!")
+		fmt.Fprintln(w, "Dado capturado com sucesso e salvo no banco de dados!")
 	} else {
 		log.Println("[-] Requisição recebida sem dados.")
 		http.Error(w, "Nenhum dado recebido.", http.StatusBadRequest)
@@ -40,18 +50,57 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func logHandler(w http.ResponseWriter, r *http.Request) {
-	content, err := os.ReadFile(logFilePath)
+	querySQL := `SELECT timestamp, data FROM logs ORDER BY id ASC`
+	rows, err := db.Query(querySQL)
 	if err != nil {
-		log.Printf("Erro ao ler o arquivo: %v\n", err)
+		log.Printf("Erro ao ler do banco de dados: %v\n", err)
 		http.Error(w, "Erro ao ler os dados.", http.StatusInternalServerError)
 		return
 	}
+	defer rows.Close()
+
+	var entries []string
+	for rows.Next() {
+		var timestamp, dataValue string
+		if err := rows.Scan(&timestamp, &dataValue); err != nil {
+			log.Printf("Erro ao escanear linha: %v\n", err)
+			// Consider how to handle this - skip entry or return error
+			continue
+		}
+		entries = append(entries, fmt.Sprintf("%s - %s", timestamp, dataValue))
+	}
+
+	if err = rows.Err(); err != nil { // Check for errors during iteration
+		log.Printf("Erro nas linhas do banco de dados: %v", err)
+		http.Error(w, "Erro ao processar dados do banco.", http.StatusInternalServerError)
+		return
+	}
+
+	content := "Nenhum dado capturado ainda."
+	if len(entries) > 0 {
+		content = strings.Join(entries, "\n")
+	}
 
 	w.Header().Set("Content-Type", "text/plain")
-	w.Write(content)
+	w.Write([]byte(content))
 }
 
 func main() {
+	var err error
+	db, err = sql.Open("sqlite3", "./dados_capturados.db")
+	if err != nil {
+		log.Fatalf("Error opening database: %v", err)
+	}
+	defer db.Close()
+
+	err = db.Ping() // Verify database connection
+	if err != nil {
+		log.Fatalf("Error connecting to database: %v", err)
+	}
+	log.Println("Database connected successfully.")
+
+	createTable() // Create the table if it doesn't exist
+
 	http.HandleFunc("/", handler)
 	http.HandleFunc("/log", logHandler)
 
