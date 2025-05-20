@@ -8,7 +8,7 @@ COPY go.mod .
 COPY go.sum .
 
 # Compila o binário de forma estática e sem dependências do sistema
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o malicious
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o malicious
 
 # Etapa 2: imagem final com scratch
 FROM scratch
