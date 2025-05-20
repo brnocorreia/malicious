@@ -10,8 +10,8 @@ COPY main.go .
 COPY go.mod .
 COPY go.sum .
 
-# Compila o binário com CGO habilitado
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o malicious
+# Compila o binário de forma completamente estática mesmo com CGO habilitado
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags="-linkmode external -extldflags -static" -o malicious
 
 # Etapa 2: imagem final com scratch
 FROM scratch
